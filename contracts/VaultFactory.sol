@@ -7,6 +7,8 @@ import "./FeeConfig.sol";
 import "./interfaces/ISwapRouter02.sol";
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
+
 
 /// @title Mercuri Vault Factory
 /// @notice Deploys and manages Mercuri Vaults that control Uniswap V3 LP positions.
@@ -132,7 +134,13 @@ contract VaultFactory is Ownable {
             "vault exists for this pool"
         );
 
-        require(IUniswapV3Pool(pool).factory() == UNISWAP_V3_FACTORY, "invalid pool");
+        address token0 = IUniswapV3Pool(pool).token0();
+        address token1 = IUniswapV3Pool(pool).token1();
+        uint24 fee = IUniswapV3Pool(pool).fee();
+        address expectedPool = IUniswapV3Factory(UNISWAP_V3_FACTORY)
+            .getPool(token0, token1, fee);
+
+        require(expectedPool == pool, "INVALID_POOL");
 
         vaultAddr = address(
             new Vault(

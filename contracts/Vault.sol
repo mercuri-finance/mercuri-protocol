@@ -181,6 +181,13 @@ contract Vault is ReentrancyGuard {
         payable
         nonReentrant
     {
+        require(
+            msg.value == 0 ||
+            token0 == WETH ||
+            token1 == WETH,
+            "ETH_NOT_ACCEPTED"
+        );
+
         if (token0 == WETH && msg.value > 0) {
             require(amount0 == msg.value, "wrong ETH amount0");
             IWETH(WETH).deposit{value: msg.value}();
@@ -199,47 +206,6 @@ contract Vault is ReentrancyGuard {
         emit Deposit(token1, amount1);
     }
 
-    /// @notice Applies protocol performance fees to a position
-    /// @dev
-    ///  - Fetches fee configuration from VaultFactory
-    ///  - Collects all owed fees from Uniswap first
-    ///  - Transfers protocol share to fee recipient
-    ///  - Emits PerformanceFeeTaken
-    /// @param tokenId ID of the Uniswap V3 position NFT
-    function _applyPerformanceFee(uint256 tokenId) internal {
-        (uint16 perf, address recipient) = VaultFactory(factory).protocolFees();
-
-        FeeConfig.Fees memory feesCfg = FeeConfig.Fees({
-            performanceFeeBps: perf,
-            feeRecipient: recipient
-        });
-
-        uint16 perfBps = feesCfg.performanceFeeBps;
-        if (perfBps == 0) return;
-
-        (, , , , , , , , , , uint128 owed0, uint128 owed1) =
-            INonfungiblePositionManager(positionManager).positions(tokenId);
-
-        if (owed0 == 0 && owed1 == 0) return;
-
-        INonfungiblePositionManager(positionManager).collect(
-            INonfungiblePositionManager.CollectParams({
-                tokenId: tokenId,
-                recipient: address(this),
-                amount0Max: type(uint128).max,
-                amount1Max: type(uint128).max
-            })
-        );
-
-        uint256 fee0 = (owed0 * perfBps) / FeeConfig.BPS_DIVISOR;
-        uint256 fee1 = (owed1 * perfBps) / FeeConfig.BPS_DIVISOR;
-
-        if (fee0 > 0) IERC20(token0).safeTransfer(feesCfg.feeRecipient, fee0);
-        if (fee1 > 0) IERC20(token1).safeTransfer(feesCfg.feeRecipient, fee1);
-
-        emit PerformanceFeeTaken(tokenId, fee0, fee1);
-    }
-
     /// @notice Withdraws all liquidity and assets to the owner
     /// @dev
     ///  - Decreases all liquidity
@@ -252,31 +218,33 @@ contract Vault is ReentrancyGuard {
         uint256 posId = positionId;
 
         if (posId != 0) {
-            (, , , , , , , uint128 liq, , , ,) =
-                INonfungiblePositionManager(positionManager).positions(posId);
-
-            if (liq > 0) {
-                INonfungiblePositionManager(positionManager).decreaseLiquidity(
-                    INonfungiblePositionManager.DecreaseLiquidityParams({
-                        tokenId: posId,
-                        liquidity: liq,
-                        amount0Min: 0,
-                        amount1Min: 0,
-                        deadline: block.timestamp
-                    })
-                );
-            }
-
+            // Uniswap V3 fee & liquidity unwind sequence (ORDER SENSITIVE)
+            //
+            // 1) _collectFees():
+            //    - Liquidity is still active
+            //    - This call collects **swap fees only**
+            //
+            // 2) _applyPerformanceFee():
+            //    - Applies protocol performance fee on collected swap fees
+            //    - No principal is involved at this stage
+            //
+            // 3) _decreaseAllLiquidity():
+            //    - Removes all liquidity from the position
+            //    - Moves **principal only** into tokensOwed
+            //
+            // 4) _collectFees():
+            //    - Liquidity is now zero
+            //    - This call collects the **principal**
+            //
+            // NOTE:
+            // - The same collect() primitive is used twice, but its effect
+            //   depends on whether liquidity is active or not.
+            // - Changing this order would incorrectly mix fees and principal
+            //   and may cause protocol fees to be charged on principal.
+            _collectFees(posId);
             _applyPerformanceFee(posId);
-
-            INonfungiblePositionManager(positionManager).collect(
-                INonfungiblePositionManager.CollectParams({
-                    tokenId: posId,
-                    recipient: address(this),
-                    amount0Max: type(uint128).max,
-                    amount1Max: type(uint128).max
-                })
-            );
+            _decreaseAllLiquidity(posId);
+            _collectFees(posId);
 
             INonfungiblePositionManager(positionManager).burn(posId);
             positionId = 0;
@@ -291,6 +259,8 @@ contract Vault is ReentrancyGuard {
     ///  - Intended for emergency recovery
     ///  - Does not apply protocol fees
     ///  - Does not modify positionId
+    ///  - Does NOT withdraw or modify any active Uniswap V3 position
+
     function emergencyWithdrawAll() external onlyOwner nonReentrant {
         _withdrawTokenOrETH(token0);
         _withdrawTokenOrETH(token1);
@@ -303,6 +273,7 @@ contract Vault is ReentrancyGuard {
     /// @param token Address of the token to withdraw
     function _withdrawTokenOrETH(address token) internal {
         uint256 bal = IERC20(token).balanceOf(address(this));
+
         if (bal == 0) return;
 
         if (token == WETH) {
@@ -337,6 +308,7 @@ contract Vault is ReentrancyGuard {
         require(params.token0 == token0 && params.token1 == token1, "wrong tokens");
         require(params.fee == fee, "wrong fee");
         require(positionId == 0, "position exists");
+        require(params.recipient == address(this), "INVALID_RECIPIENT");
 
         if (params.amount0Desired > 0) {
             IERC20(token0).safeApprove(positionManager, 0);
@@ -369,6 +341,8 @@ contract Vault is ReentrancyGuard {
         nonReentrant
         returns (uint128 liquidity, uint256 amount0, uint256 amount1)
     {
+        require(params.tokenId == positionId, "INVALID_TOKEN_ID");
+
         if (params.amount0Desired > 0) {
             IERC20(token0).safeApprove(positionManager, 0);
             IERC20(token0).safeApprove(positionManager, params.amount0Desired);
@@ -394,6 +368,7 @@ contract Vault is ReentrancyGuard {
         nonReentrant
         returns (uint256 amount0, uint256 amount1)
     {
+        require(params.tokenId == positionId, "INVALID_TOKEN_ID");
         return INonfungiblePositionManager(positionManager).decreaseLiquidity(params);
     }
 
@@ -412,6 +387,9 @@ contract Vault is ReentrancyGuard {
         nonReentrant
         returns (uint256 amount0, uint256 amount1)
     {
+        require(params.tokenId == positionId, "INVALID_TOKEN_ID");
+        require(params.recipient == address(this), "INVALID_RECIPIENT");
+
         return INonfungiblePositionManager(positionManager).collect(params);
     }
 
@@ -441,31 +419,35 @@ contract Vault is ReentrancyGuard {
         onlyAuthorized
         nonReentrant
     {
-        (, , , , , , , uint128 liquidity, , , ,) =
-            INonfungiblePositionManager(positionManager).positions(tokenId);
+        require(tokenId == positionId, "INVALID_TOKEN_ID");
 
-        if (liquidity > 0) {
-            INonfungiblePositionManager(positionManager).decreaseLiquidity(
-                INonfungiblePositionManager.DecreaseLiquidityParams({
-                    tokenId: tokenId,
-                    liquidity: liquidity,
-                    amount0Min: 0,
-                    amount1Min: 0,
-                    deadline: block.timestamp
-                })
-            );
-        }
-
+        // Uniswap V3 fee & liquidity unwind sequence (ORDER SENSITIVE)
+        //
+        // 1) _collectFees():
+        //    - Liquidity is still active
+        //    - This call collects **swap fees only**
+        //
+        // 2) _applyPerformanceFee():
+        //    - Applies protocol performance fee on collected swap fees
+        //    - No principal is involved at this stage
+        //
+        // 3) _decreaseAllLiquidity():
+        //    - Removes all liquidity from the position
+        //    - Moves **principal only** into tokensOwed
+        //
+        // 4) _collectFees():
+        //    - Liquidity is now zero
+        //    - This call collects the **principal**
+        //
+        // NOTE:
+        // - The same collect() primitive is used twice, but its effect
+        //   depends on whether liquidity is active or not.
+        // - Changing this order would incorrectly mix fees and principal
+        //   and may cause protocol fees to be charged on principal.
+        _collectFees(tokenId);
         _applyPerformanceFee(tokenId);
-
-        INonfungiblePositionManager(positionManager).collect(
-            INonfungiblePositionManager.CollectParams({
-                tokenId: tokenId,
-                recipient: address(this),
-                amount0Max: type(uint128).max,
-                amount1Max: type(uint128).max
-            })
-        );
+        _decreaseAllLiquidity(tokenId);
+        _collectFees(tokenId);
 
         INonfungiblePositionManager(positionManager).burn(tokenId);
         emit PositionClosed(tokenId);
@@ -516,5 +498,77 @@ contract Vault is ReentrancyGuard {
         if (msg.sender == router) {
             IWETH(WETH).deposit{value: msg.value}();
         }
+    }
+
+    /// @notice Applies protocol performance fees on already-collected swap fees
+    /// @dev
+    ///  - Assumes swap fees have already been collected into the vault
+    ///    via `_collectFees()` while liquidity was active
+    ///  - Must NOT be called after liquidity removal, otherwise
+    ///    principal would be incorrectly charged
+    function _applyPerformanceFee(uint256 tokenId) internal {
+        (uint16 perfBps, address recipient) =
+            VaultFactory(factory).protocolFees();
+
+        if (perfBps == 0) return;
+        require(perfBps <= FeeConfig.BPS_DIVISOR, "FEE_TOO_HIGH");
+
+        uint256 bal0 = IERC20(token0).balanceOf(address(this));
+        uint256 bal1 = IERC20(token1).balanceOf(address(this));
+
+        uint256 fee0 = (bal0 * perfBps) / FeeConfig.BPS_DIVISOR;
+        uint256 fee1 = (bal1 * perfBps) / FeeConfig.BPS_DIVISOR;
+
+        if (fee0 > 0) IERC20(token0).safeTransfer(recipient, fee0);
+        if (fee1 > 0) IERC20(token1).safeTransfer(recipient, fee1);
+
+        emit PerformanceFeeTaken(tokenId, fee0, fee1);
+    }
+
+    /// @notice Removes all liquidity from the active Uniswap V3 position
+    /// @dev
+    ///  IMPORTANT UNISWAP V3 SEMANTICS:
+    ///  - Calling `decreaseLiquidity` moves **only principal** (not fees)
+    ///    from the position into `tokensOwed0` / `tokensOwed1`.
+    ///  - Any swap fees accrued **before this call** must be collected
+    ///    separately via `collect()` while liquidity is still active.
+    ///  - After this function executes, the position will have
+    ///    `liquidity == 0`, and subsequent `collect()` calls will
+    ///    withdraw the principal.
+    function _decreaseAllLiquidity(uint256 tokenId) internal {
+        (, , , , , , , uint128 liquidity, , , ,) =
+            INonfungiblePositionManager(positionManager).positions(tokenId);
+
+        if (liquidity > 0) {
+            INonfungiblePositionManager(positionManager).decreaseLiquidity(
+                INonfungiblePositionManager.DecreaseLiquidityParams({
+                    tokenId: tokenId,
+                    liquidity: liquidity,
+                    amount0Min: 0,
+                    amount1Min: 0,
+                    deadline: block.timestamp
+                })
+            );
+        }
+    }
+
+    /// @notice Collects all currently owed amounts from Uniswap V3
+    /// @dev
+    ///  IMPORTANT UNISWAP V3 SEMANTICS:
+    ///  - If liquidity is still active (> 0), this collects **swap fees only**
+    ///  - If liquidity has been fully removed (liquidity == 0),
+    ///    this collects **principal + any remaining fees**
+    ///
+    ///  This function is intentionally generic; its meaning depends on
+    ///  when it is called in the LP lifecycle.
+    function _collectFees(uint256 tokenId) internal {
+        INonfungiblePositionManager(positionManager).collect(
+            INonfungiblePositionManager.CollectParams({
+                tokenId: tokenId,
+                recipient: address(this),
+                amount0Max: type(uint128).max,
+                amount1Max: type(uint128).max
+            })
+        );
     }
 }
