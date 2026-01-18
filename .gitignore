@@ -1,0 +1,71 @@
+
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Hardhat / Ethereum
+artifacts/
+cache/
+typechain/
+typechain-types/
+coverage/
+coverage.json
+
+# Hardhat local networks / forks
+hardhat-network/
+anvil/
+anvil-state.json
+
+# Build / Output
+dist/
+build/
+out/
+
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+
+# TypeScript
+*.tsbuildinfo
+
+# Testing / Coverage
+coverage/
+.nyc_output/
+
+# Misc
+*.log
+*.tmp
+*.temp
+
+# Foundry (if ever used alongside Hardhat)
+out/
+cache/
+
+# Solidity tooling
+.solhint.json
+.solhintignore
+.slither.json
+.slither-cache/
+
+# CI / Tooling
+reports/
+.audit/
