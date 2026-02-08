@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.32;
 
 import "./Vault.sol";
 import "./interfaces/ManagerRegistry.sol";
 import "./FeeConfig.sol";
 import "./interfaces/ISwapRouter02.sol";
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
-
 
 /// @title Mercuri Vault Factory
 /// @notice Deploys and manages Mercuri Vaults that control Uniswap V3 LP positions.
 /// @dev The factory also maintains global protocol fee configuration for all Mercuri vaults.
-contract VaultFactory is Ownable {
+contract VaultFactory is Ownable2Step {
     using FeeConfig for FeeConfig.Fees;
 
     /// @notice Address of the Uniswap V3 Factory.
@@ -62,7 +61,6 @@ contract VaultFactory is Ownable {
     /// @param positionManager Address of the Uniswap V3 NonfungiblePositionManager.
     /// @param managerRegistry Address of the Mercuri Manager Registry.
     /// @param weth Address of the WETH contract.
-    
     constructor(
         address uniswapFactory,
         address positionManager,
@@ -74,6 +72,7 @@ contract VaultFactory is Ownable {
         require(positionManager != address(0), "zero posman");
         require(managerRegistry != address(0), "zero registry");
         require(weth != address(0), "zero weth");
+        require(swapRouter != address(0), "zero router");
 
         UNISWAP_V3_FACTORY = uniswapFactory;
         POSITION_MANAGER = positionManager;
@@ -96,6 +95,7 @@ contract VaultFactory is Ownable {
         address feeRecipient
     ) external onlyOwner {
         require(feeRecipient != address(0), "zero feeRecipient");
+        require(performanceFeeBps <= FeeConfig.BPS_DIVISOR, "FEE_TOO_HIGH");
 
         protocolFees = FeeConfig.Fees({
             performanceFeeBps: performanceFeeBps,
@@ -129,6 +129,12 @@ contract VaultFactory is Ownable {
     {
         require(pool != address(0), "zero pool");
         require(manager != address(0), "zero manager");
+
+        require(
+            ManagerRegistry(MANAGER_REGISTRY).isApproved(manager),
+            "MANAGER_NOT_APPROVED"
+        );
+
         require(
             _vaultByOwnerAndPool[msg.sender][pool] == address(0),
             "vault exists for this pool"

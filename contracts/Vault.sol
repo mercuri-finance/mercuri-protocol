@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.32;
 
 import "./interfaces/INonfungiblePositionManager.sol";
 import "./interfaces/IWETH.sol";
@@ -71,6 +71,15 @@ contract Vault is ReentrancyGuard {
 
     /// @notice Current Uniswap V3 position NFT ID (0 if none)
     uint256 public positionId;
+
+    /// @notice Accumulated swap fees in token0 awaiting protocol fee application
+    uint256 private accruedFees0;
+
+    /// @notice Accumulated swap fees in token1 awaiting protocol fee application
+    uint256 private accruedFees1;
+
+    /// @notice Whether WETH withdrawals should be unwrapped into native ETH
+    bool public unwrapWETH = true;
 
     /// @notice Emitted when the manager address is updated
     /// @param newManager Newly authorized manager
@@ -164,8 +173,19 @@ contract Vault is ReentrancyGuard {
     /// - ManagerRegistry is not enforced after deployment
     /// @param newManager Address of the new manager
     function setManager(address newManager) external onlyOwner {
+        require(newManager != address(0), "zero manager");
         manager = newManager;
         emit ManagerChanged(newManager);
+    }
+
+    /// @notice Configures whether WETH withdrawals are unwrapped into native ETH
+    /// @dev
+    ///  - If enabled, WETH balances are unwrapped and transferred as ETH to the owner
+    ///  - If disabled, WETH is transferred directly as an ERC20 token
+    ///  - Prevents withdrawal failures when the owner is a non-payable contract
+    /// @param value True to unwrap WETH into ETH, false to keep WETH as ERC20
+    function setUnwrapWETH(bool value) external onlyOwner {
+        unwrapWETH = value;
     }
 
     /// @notice Deposits token0 and token1 into the vault
@@ -254,17 +274,6 @@ contract Vault is ReentrancyGuard {
         _withdrawTokenOrETH(token1);
     }
 
-    /// @notice Withdraws all token balances without touching the LP position
-    /// @dev
-    ///  - Intended for emergency recovery
-    ///  - Does not apply protocol fees
-    ///  - Does not modify positionId
-    ///  - Does NOT withdraw or modify any active Uniswap V3 position
-
-    function emergencyWithdrawAll() external onlyOwner nonReentrant {
-        _withdrawTokenOrETH(token0);
-        _withdrawTokenOrETH(token1);
-    }
 
     /// @notice Withdraws full balance of a token or ETH to the owner
     /// @dev
@@ -276,7 +285,7 @@ contract Vault is ReentrancyGuard {
 
         if (bal == 0) return;
 
-        if (token == WETH) {
+        if (token == WETH && unwrapWETH) {
             IWETH(WETH).withdraw(bal);
             (bool ok, ) = owner.call{value: bal}("");
             require(ok, "eth transfer failed");
@@ -309,6 +318,7 @@ contract Vault is ReentrancyGuard {
         require(params.fee == fee, "wrong fee");
         require(positionId == 0, "position exists");
         require(params.recipient == address(this), "INVALID_RECIPIENT");
+        require(params.amount0Min != 0 && params.amount1Min != 0, "NO_SLIPPAGE_PROTECTION"); 
 
         if (params.amount0Desired > 0) {
             IERC20(token0).safeApprove(positionManager, 0);
@@ -370,27 +380,6 @@ contract Vault is ReentrancyGuard {
     {
         require(params.tokenId == positionId, "INVALID_TOKEN_ID");
         return INonfungiblePositionManager(positionManager).decreaseLiquidity(params);
-    }
-
-    /// @notice Collects swap fees from the active position
-    /// @dev
-    ///  - Does not apply protocol fees
-    ///  - Fees remain in vault balance
-    /// @param params Collect parameters per INonfungiblePositionManager
-    /// @return amount0 Token0 collected
-    /// @return amount1 Token1 collected
-    function collect(
-        INonfungiblePositionManager.CollectParams calldata params
-    )
-        external
-        onlyAuthorized
-        nonReentrant
-        returns (uint256 amount0, uint256 amount1)
-    {
-        require(params.tokenId == positionId, "INVALID_TOKEN_ID");
-        require(params.recipient == address(this), "INVALID_RECIPIENT");
-
-        return INonfungiblePositionManager(positionManager).collect(params);
     }
 
     /// @notice Burns a Uniswap V3 position NFT
@@ -495,6 +484,8 @@ contract Vault is ReentrancyGuard {
             "unauthorized eth sender"
         );
 
+        require(token0 == WETH || token1 == WETH, "WETH_NOT_SUPPORTED");
+
         if (msg.sender == router) {
             IWETH(WETH).deposit{value: msg.value}();
         }
@@ -513,16 +504,22 @@ contract Vault is ReentrancyGuard {
         if (perfBps == 0) return;
         require(perfBps <= FeeConfig.BPS_DIVISOR, "FEE_TOO_HIGH");
 
-        uint256 bal0 = IERC20(token0).balanceOf(address(this));
-        uint256 bal1 = IERC20(token1).balanceOf(address(this));
+        uint256 fee0 = (accruedFees0 * perfBps) / FeeConfig.BPS_DIVISOR;
+        uint256 fee1 = (accruedFees1 * perfBps) / FeeConfig.BPS_DIVISOR;
 
-        uint256 fee0 = (bal0 * perfBps) / FeeConfig.BPS_DIVISOR;
-        uint256 fee1 = (bal1 * perfBps) / FeeConfig.BPS_DIVISOR;
-
-        if (fee0 > 0) IERC20(token0).safeTransfer(recipient, fee0);
-        if (fee1 > 0) IERC20(token1).safeTransfer(recipient, fee1);
+        if (fee0 > 0) {
+            accruedFees0 -= fee0;
+            IERC20(token0).safeTransfer(recipient, fee0);
+        }
+        if (fee1 > 0) {
+            accruedFees1 -= fee1;
+            IERC20(token1).safeTransfer(recipient, fee1);
+        }
 
         emit PerformanceFeeTaken(tokenId, fee0, fee1);
+
+        accruedFees0 = 0;
+        accruedFees1 = 0;
     }
 
     /// @notice Removes all liquidity from the active Uniswap V3 position
@@ -562,13 +559,23 @@ contract Vault is ReentrancyGuard {
     ///  This function is intentionally generic; its meaning depends on
     ///  when it is called in the LP lifecycle.
     function _collectFees(uint256 tokenId) internal {
-        INonfungiblePositionManager(positionManager).collect(
-            INonfungiblePositionManager.CollectParams({
-                tokenId: tokenId,
-                recipient: address(this),
-                amount0Max: type(uint128).max,
-                amount1Max: type(uint128).max
-            })
-        );
+        (,,,,,,, uint128 liquidity,,,,) =
+            INonfungiblePositionManager(positionManager).positions(tokenId);
+
+        (uint256 a0, uint256 a1) =
+            INonfungiblePositionManager(positionManager).collect(
+                INonfungiblePositionManager.CollectParams({
+                    tokenId: tokenId,
+                    recipient: address(this),
+                    amount0Max: type(uint128).max,
+                    amount1Max: type(uint128).max
+                })
+            );
+
+        // Only count swap fees if liquidity was active BEFORE collecting
+        if (liquidity > 0) {
+            accruedFees0 += a0;
+            accruedFees1 += a1;
+        }
     }
 }

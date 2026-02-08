@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.32;
 
 /// @title Mercuri ERC-20 Token Interface
 /// @notice Standard ERC-20 interface used by Mercuri Finance vaults and libraries.

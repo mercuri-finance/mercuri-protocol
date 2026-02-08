@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.32;
 
 /// @title Mercuri Fee Configuration Library
 /// @notice Defines the shared fee configuration and constants used across Mercuri Finance vaults and the factory.

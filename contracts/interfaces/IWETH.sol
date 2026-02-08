@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.32;
 
 /// @title Mercuri WETH Interface
 /// @notice Interface for Wrapped Ether (WETH) operations used in Mercuri Finance vaults.

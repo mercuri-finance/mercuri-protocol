@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-pragma solidity ^0.8.20;
+pragma solidity 0.8.32;
 pragma abicoder v2;
 
 import "@openzeppelin/contracts/interfaces/IERC721Metadata.sol";
