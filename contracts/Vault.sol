@@ -311,11 +311,9 @@ contract Vault is ReentrancyGuard {
         require(params.amount0Min != 0 && params.amount1Min != 0, "NO_SLIPPAGE_PROTECTION"); 
 
         if (params.amount0Desired > 0) {
-            IERC20(token0).forceApprove(positionManager, 0);
             IERC20(token0).forceApprove(positionManager, params.amount0Desired);
         }
         if (params.amount1Desired > 0) {
-            IERC20(token1).forceApprove(positionManager, 0);
             IERC20(token1).forceApprove(positionManager, params.amount1Desired);
         }
 
@@ -344,11 +342,9 @@ contract Vault is ReentrancyGuard {
         require(params.tokenId == positionId, "INVALID_TOKEN_ID");
 
         if (params.amount0Desired > 0) {
-            IERC20(token0).forceApprove(positionManager, 0);
             IERC20(token0).forceApprove(positionManager, params.amount0Desired);
         }
         if (params.amount1Desired > 0) {
-            IERC20(token1).forceApprove(positionManager, 0);
             IERC20(token1).forceApprove(positionManager, params.amount1Desired);
         }
 
@@ -456,7 +452,6 @@ contract Vault is ReentrancyGuard {
             "INVALID_PAIR"
         );
 
-        IERC20(params.tokenIn).forceApprove(address(swapRouter), 0);
         IERC20(params.tokenIn).forceApprove(address(swapRouter), params.amountIn);
 
         amountOut = swapRouter.exactInputSingle(params);
