@@ -4,12 +4,12 @@ pragma solidity 0.8.32;
 import "./interfaces/INonfungiblePositionManager.sol";
 import "./interfaces/IWETH.sol";
 import "./interfaces/ISwapRouter02.sol";
-import "./interfaces/SafeERC20.sol";
-import "./interfaces/IERC20.sol";
 import "./FeeConfig.sol";
 import "./VaultFactory.sol";
 import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title Mercuri Vault
 /// @author Mercuri Finance
@@ -41,8 +41,8 @@ contract Vault is ReentrancyGuard {
 
     /// @notice Optional delegated manager for operational actions
     /// @dev Cannot withdraw funds to arbitrary addresses
-    /// ManagerRegistry is advisory.
-    /// The protocol does not enforce manager approval at the vault level.
+    /// ManagerRegistry is enforced only at vault creation by the factory.
+    /// After deployment, the owner may assign any manager at their own risk.
     address public manager;
 
     /// @notice Mercuri registry contract address
@@ -81,10 +81,6 @@ contract Vault is ReentrancyGuard {
     /// @notice Whether WETH withdrawals should be unwrapped into native ETH
     bool public unwrapWETH = true;
 
-    /// @notice Emitted when the manager address is updated
-    /// @param newManager Newly authorized manager
-    event ManagerChanged(address indexed newManager);
-
     /// @notice Emitted when assets are deposited into the vault
     /// @param token Deposited token address
     /// @param amount Amount deposited
@@ -119,7 +115,13 @@ contract Vault is ReentrancyGuard {
     /// @notice Restricts execution to owner or delegated manager
     /// @dev Used for LP lifecycle, swaps, and rebalancing
     modifier onlyAuthorized() {
-        require(msg.sender == owner || msg.sender == manager, "not authorized");
+        if (msg.sender == owner) {
+            _;
+            return;
+        }
+
+        require(msg.sender == manager, "not authorized");
+        require(ManagerRegistry(registry).isApproved(manager), "MANAGER_NOT_APPROVED");
         _;
     }
 
@@ -164,18 +166,6 @@ contract Vault is ReentrancyGuard {
         token0 = IUniswapV3Pool(pool_).token0();
         token1 = IUniswapV3Pool(pool_).token1();
         fee = IUniswapV3Pool(pool_).fee();
-    }
-
-    /// @notice Updates the authorized operational manager
-    /// @dev
-    /// - Initial manager is assigned by the protocol and registry-approved
-    /// - Vault owners may override the manager at their own risk
-    /// - ManagerRegistry is not enforced after deployment
-    /// @param newManager Address of the new manager
-    function setManager(address newManager) external onlyOwner {
-        require(newManager != address(0), "zero manager");
-        manager = newManager;
-        emit ManagerChanged(newManager);
     }
 
     /// @notice Configures whether WETH withdrawals are unwrapped into native ETH
@@ -321,12 +311,12 @@ contract Vault is ReentrancyGuard {
         require(params.amount0Min != 0 && params.amount1Min != 0, "NO_SLIPPAGE_PROTECTION"); 
 
         if (params.amount0Desired > 0) {
-            IERC20(token0).safeApprove(positionManager, 0);
-            IERC20(token0).safeApprove(positionManager, params.amount0Desired);
+            IERC20(token0).forceApprove(positionManager, 0);
+            IERC20(token0).forceApprove(positionManager, params.amount0Desired);
         }
         if (params.amount1Desired > 0) {
-            IERC20(token1).safeApprove(positionManager, 0);
-            IERC20(token1).safeApprove(positionManager, params.amount1Desired);
+            IERC20(token1).forceApprove(positionManager, 0);
+            IERC20(token1).forceApprove(positionManager, params.amount1Desired);
         }
 
         (tokenId, liquidity, amount0, amount1) =
@@ -354,12 +344,12 @@ contract Vault is ReentrancyGuard {
         require(params.tokenId == positionId, "INVALID_TOKEN_ID");
 
         if (params.amount0Desired > 0) {
-            IERC20(token0).safeApprove(positionManager, 0);
-            IERC20(token0).safeApprove(positionManager, params.amount0Desired);
+            IERC20(token0).forceApprove(positionManager, 0);
+            IERC20(token0).forceApprove(positionManager, params.amount0Desired);
         }
         if (params.amount1Desired > 0) {
-            IERC20(token1).safeApprove(positionManager, 0);
-            IERC20(token1).safeApprove(positionManager, params.amount1Desired);
+            IERC20(token1).forceApprove(positionManager, 0);
+            IERC20(token1).forceApprove(positionManager, params.amount1Desired);
         }
 
         return INonfungiblePositionManager(positionManager).increaseLiquidity(params);
@@ -466,8 +456,8 @@ contract Vault is ReentrancyGuard {
             "INVALID_PAIR"
         );
 
-        IERC20(params.tokenIn).safeApprove(address(swapRouter), 0);
-        IERC20(params.tokenIn).safeApprove(address(swapRouter), params.amountIn);
+        IERC20(params.tokenIn).forceApprove(address(swapRouter), 0);
+        IERC20(params.tokenIn).forceApprove(address(swapRouter), params.amountIn);
 
         amountOut = swapRouter.exactInputSingle(params);
     }
