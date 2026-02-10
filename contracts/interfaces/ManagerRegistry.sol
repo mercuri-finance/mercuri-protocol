@@ -7,10 +7,9 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
 /// @notice Registry of globally approved manager addresses authorized to operate Mercuri Vaults.
 /// @dev Only the contract owner can approve or revoke managers. Used by the Mercuri Vault Factory and Vaults for access control.
 contract ManagerRegistry is Ownable2Step {
-
     /// @notice Initializes the registry and sets the deployer as the initial owner.
     constructor() Ownable(msg.sender) {}
-    
+
     /// @notice Mapping of manager addresses to their approval status.
     /// @dev True means the manager is globally approved to manage Mercuri Vaults.
     mapping(address => bool) private approvedManagers;
@@ -44,7 +43,9 @@ contract ManagerRegistry is Ownable2Step {
             approvedManagers[manager] = approved;
             emit ManagerApprovalUpdated(manager, approved);
 
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 

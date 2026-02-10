@@ -88,34 +88,34 @@ interface INonfungiblePositionManager {
     /// @return liquidity The amount of liquidity added.
     /// @return amount0 The amount of token0 used to mint the position.
     /// @return amount1 The amount of token1 used to mint the position.
-    function mint(MintParams calldata params)
-        external
-        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+    function mint(
+        MintParams calldata params
+    ) external returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 
     /// @notice Increases liquidity for an existing Uniswap V3 position.
     /// @param params Increase liquidity parameters.
     /// @return liquidity The amount of new liquidity added.
     /// @return amount0 The amount of token0 spent.
     /// @return amount1 The amount of token1 spent.
-    function increaseLiquidity(IncreaseLiquidityParams calldata params)
-        external
-        returns (uint128 liquidity, uint256 amount0, uint256 amount1);
+    function increaseLiquidity(
+        IncreaseLiquidityParams calldata params
+    ) external returns (uint128 liquidity, uint256 amount0, uint256 amount1);
 
     /// @notice Decreases liquidity from an existing Uniswap V3 position.
     /// @param params Decrease liquidity parameters.
     /// @return amount0 The amount of token0 returned.
     /// @return amount1 The amount of token1 returned.
-    function decreaseLiquidity(DecreaseLiquidityParams calldata params)
-        external
-        returns (uint256 amount0, uint256 amount1);
+    function decreaseLiquidity(
+        DecreaseLiquidityParams calldata params
+    ) external returns (uint256 amount0, uint256 amount1);
 
     /// @notice Collects accrued swap fees from a Uniswap V3 position.
     /// @param params Fee collection parameters.
     /// @return amount0 The amount of token0 collected.
     /// @return amount1 The amount of token1 collected.
-    function collect(CollectParams calldata params)
-        external
-        returns (uint256 amount0, uint256 amount1);
+    function collect(
+        CollectParams calldata params
+    ) external returns (uint256 amount0, uint256 amount1);
 
     /// @notice Burns the NFT representing a Uniswap V3 position.
     /// @param tokenId ID of the position NFT to burn.
@@ -135,7 +135,9 @@ interface INonfungiblePositionManager {
     /// @return feeGrowthInside1 Fee growth inside token1 range.
     /// @return tokensOwed0 Accumulated but uncollected fees in token0.
     /// @return tokensOwed1 Accumulated but uncollected fees in token1.
-    function positions(uint256 tokenId)
+    function positions(
+        uint256 tokenId
+    )
         external
         view
         returns (

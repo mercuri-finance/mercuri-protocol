@@ -122,9 +122,9 @@ Instead, report it privately to the Mercuri team via email: <info@mercuri.financ
 3. Make your changes with clear commits
 4. Ensure all tests pass
 5. Open a pull request with:
-   - A clear description of the change
-   - Motivation and context
-   - Any relevant trade-offs or risks
+    - A clear description of the change
+    - Motivation and context
+    - Any relevant trade-offs or risks
 
 Pull requests may be reviewed for:
 

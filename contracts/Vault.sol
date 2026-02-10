@@ -190,17 +190,8 @@ contract Vault is ReentrancyGuard {
     ///  - Emits two Deposit events (one per token)
     /// @param amount0 Amount of token0 or ETH → WETH to deposit
     /// @param amount1 Amount of token1 or ETH → WETH to deposit
-    function deposit(uint256 amount0, uint256 amount1)
-        external
-        payable
-        nonReentrant
-    {
-        require(
-            msg.value == 0 ||
-            token0 == WETH ||
-            token1 == WETH,
-            "ETH_NOT_ACCEPTED"
-        );
+    function deposit(uint256 amount0, uint256 amount1) external payable nonReentrant {
+        require(msg.value == 0 || token0 == WETH || token1 == WETH, "ETH_NOT_ACCEPTED");
 
         if (token0 == WETH && msg.value != 0) {
             require(amount0 == msg.value, "wrong ETH amount0");
@@ -268,7 +259,6 @@ contract Vault is ReentrancyGuard {
         _withdrawTokenOrETH(token1);
     }
 
-
     /// @notice Withdraws full balance of a token or ETH to the owner
     /// @dev
     ///  - Unwraps WETH into ETH before transfer
@@ -312,7 +302,7 @@ contract Vault is ReentrancyGuard {
         require(params.fee == fee, "wrong fee");
         require(positionId == 0, "position exists");
         require(params.recipient == address(this), "INVALID_RECIPIENT");
-        require(params.amount0Min != 0 && params.amount1Min != 0, "NO_SLIPPAGE_PROTECTION"); 
+        require(params.amount0Min != 0 && params.amount1Min != 0, "NO_SLIPPAGE_PROTECTION");
 
         if (params.amount0Desired != 0) {
             IERC20(token0).forceApprove(positionManager, params.amount0Desired);
@@ -321,8 +311,9 @@ contract Vault is ReentrancyGuard {
             IERC20(token1).forceApprove(positionManager, params.amount1Desired);
         }
 
-        (tokenId, liquidity, amount0, amount1) =
-            INonfungiblePositionManager(positionManager).mint(params);
+        (tokenId, liquidity, amount0, amount1) = INonfungiblePositionManager(positionManager).mint(
+            params
+        );
 
         positionId = tokenId;
     }
@@ -344,10 +335,7 @@ contract Vault is ReentrancyGuard {
         returns (uint128 liquidity, uint256 amount0, uint256 amount1)
     {
         require(params.tokenId == positionId, "INVALID_TOKEN_ID");
-        require(
-            params.amount0Min != 0 && params.amount1Min != 0,
-            "NO_SLIPPAGE_PROTECTION"
-        );
+        require(params.amount0Min != 0 && params.amount1Min != 0, "NO_SLIPPAGE_PROTECTION");
 
         if (params.amount0Desired != 0) {
             IERC20(token0).forceApprove(positionManager, params.amount0Desired);
@@ -366,12 +354,7 @@ contract Vault is ReentrancyGuard {
     /// @return amount1 Token1 returned
     function decreaseLiquidity(
         INonfungiblePositionManager.DecreaseLiquidityParams calldata params
-    )
-        external
-        onlyAuthorized
-        nonReentrant
-        returns (uint256 amount0, uint256 amount1)
-    {
+    ) external onlyAuthorized nonReentrant returns (uint256 amount0, uint256 amount1) {
         require(params.tokenId == positionId, "INVALID_TOKEN_ID");
 
         _collectFees(positionId);
@@ -385,11 +368,7 @@ contract Vault is ReentrancyGuard {
     ///  - Does not automatically withdraw liquidity
     ///  - Clears positionId if burning active position
     /// @param tokenId ID of the NFT to burn
-    function burn(uint256 tokenId)
-        external
-        onlyAuthorized
-        nonReentrant
-    {
+    function burn(uint256 tokenId) external onlyAuthorized nonReentrant {
         INonfungiblePositionManager(positionManager).burn(tokenId);
         if (tokenId == positionId) positionId = 0;
     }
@@ -401,11 +380,7 @@ contract Vault is ReentrancyGuard {
     ///  - Collects remaining fees
     ///  - Burns the NFT
     /// @param tokenId ID of the position to close
-    function closePosition(uint256 tokenId)
-        external
-        onlyAuthorized
-        nonReentrant
-    {
+    function closePosition(uint256 tokenId) external onlyAuthorized nonReentrant {
         require(tokenId == positionId, "INVALID_TOKEN_ID");
 
         // Uniswap V3 fee & liquidity unwind sequence (ORDER SENSITIVE)
@@ -450,18 +425,13 @@ contract Vault is ReentrancyGuard {
     /// @return amountOut Amount of token received
     function rebalanceExactInputSingle(
         ISwapRouter02.ExactInputSingleParams calldata params
-    )
-        external
-        onlyAuthorized
-        nonReentrant
-        returns (uint256 amountOut)
-    {
+    ) external onlyAuthorized nonReentrant returns (uint256 amountOut) {
         require(params.recipient == address(this), "BAD_RECIPIENT");
         require(params.amountOutMinimum != 0, "NO_SLIPPAGE_PROTECTION");
 
         require(
             (params.tokenIn == token0 && params.tokenOut == token1) ||
-            (params.tokenIn == token1 && params.tokenOut == token0),
+                (params.tokenIn == token1 && params.tokenOut == token0),
             "INVALID_PAIR"
         );
 
@@ -477,10 +447,7 @@ contract Vault is ReentrancyGuard {
     receive() external payable {
         address router = address(swapRouter);
 
-        require(
-            msg.sender == WETH || msg.sender == router,
-            "unauthorized eth sender"
-        );
+        require(msg.sender == WETH || msg.sender == router, "unauthorized eth sender");
 
         require(token0 == WETH || token1 == WETH, "WETH_NOT_SUPPORTED");
 
@@ -496,8 +463,7 @@ contract Vault is ReentrancyGuard {
     ///  - Must NOT be called after liquidity removal, otherwise
     ///    principal would be incorrectly charged
     function _applyPerformanceFee(uint256 tokenId) internal {
-        (uint16 perfBps, address recipient) =
-            VaultFactory(factory).protocolFees();
+        (uint16 perfBps, address recipient) = VaultFactory(factory).protocolFees();
 
         if (perfBps == 0) return;
         require(perfBps <= FeeConfig.BPS_DIVISOR, "FEE_TOO_HIGH");
@@ -531,8 +497,8 @@ contract Vault is ReentrancyGuard {
     ///    `liquidity == 0`, and subsequent `collect()` calls will
     ///    withdraw the principal.
     function _decreaseAllLiquidity(uint256 tokenId) internal {
-        (, , , , , , , uint128 liquidity, , , ,) =
-            INonfungiblePositionManager(positionManager).positions(tokenId);
+        (, , , , , , , uint128 liquidity, , , , ) = INonfungiblePositionManager(positionManager)
+            .positions(tokenId);
 
         if (liquidity != 0) {
             INonfungiblePositionManager(positionManager).decreaseLiquidity(
@@ -557,18 +523,17 @@ contract Vault is ReentrancyGuard {
     ///  This function is intentionally generic; its meaning depends on
     ///  when it is called in the LP lifecycle.
     function _collectFees(uint256 tokenId) internal {
-        (,,,,,,, uint128 liquidity,,,,) =
-            INonfungiblePositionManager(positionManager).positions(tokenId);
+        (, , , , , , , uint128 liquidity, , , , ) = INonfungiblePositionManager(positionManager)
+            .positions(tokenId);
 
-        (uint256 a0, uint256 a1) =
-            INonfungiblePositionManager(positionManager).collect(
-                INonfungiblePositionManager.CollectParams({
-                    tokenId: tokenId,
-                    recipient: address(this),
-                    amount0Max: type(uint128).max,
-                    amount1Max: type(uint128).max
-                })
-            );
+        (uint256 a0, uint256 a1) = INonfungiblePositionManager(positionManager).collect(
+            INonfungiblePositionManager.CollectParams({
+                tokenId: tokenId,
+                recipient: address(this),
+                amount0Max: type(uint128).max,
+                amount1Max: type(uint128).max
+            })
+        );
 
         // Only count swap fees if liquidity was active BEFORE collecting
         if (liquidity != 0) {

@@ -80,20 +80,14 @@ contract VaultFactory is Ownable2Step {
         WETH = weth;
         SWAP_ROUTER = swapRouter;
 
-        protocolFees = FeeConfig.Fees({
-            performanceFeeBps: 0,
-            feeRecipient: msg.sender
-        });
+        protocolFees = FeeConfig.Fees({performanceFeeBps: 0, feeRecipient: msg.sender});
     }
 
     /// @notice Updates the global protocol fee configuration for all Mercuri vaults.
     /// @dev Only callable by the contract owner.
     /// @param performanceFeeBps The new performance fee in basis points.
     /// @param feeRecipient The address that will receive protocol fees.
-    function setProtocolFees(
-        uint16 performanceFeeBps,
-        address feeRecipient
-    ) external onlyOwner {
+    function setProtocolFees(uint16 performanceFeeBps, address feeRecipient) external onlyOwner {
         require(feeRecipient != address(0), "zero feeRecipient");
         require(performanceFeeBps <= FeeConfig.BPS_DIVISOR, "FEE_TOO_HIGH");
 
@@ -123,28 +117,18 @@ contract VaultFactory is Ownable2Step {
     /// @param pool Address of the Uniswap V3 pool managed by the vault
     /// @param manager Address of the authorized automation manager
     /// @return vaultAddr Address of the newly deployed vault
-    function createVault(address pool, address manager)
-        external
-        returns (address vaultAddr)
-    {
+    function createVault(address pool, address manager) external returns (address vaultAddr) {
         require(pool != address(0), "zero pool");
         require(manager != address(0), "zero manager");
 
-        require(
-            ManagerRegistry(MANAGER_REGISTRY).isApproved(manager),
-            "MANAGER_NOT_APPROVED"
-        );
+        require(ManagerRegistry(MANAGER_REGISTRY).isApproved(manager), "MANAGER_NOT_APPROVED");
 
-        require(
-            _vaultByOwnerAndPool[msg.sender][pool] == address(0),
-            "vault exists for this pool"
-        );
+        require(_vaultByOwnerAndPool[msg.sender][pool] == address(0), "vault exists for this pool");
 
         address token0 = IUniswapV3Pool(pool).token0();
         address token1 = IUniswapV3Pool(pool).token1();
         uint24 fee = IUniswapV3Pool(pool).fee();
-        address expectedPool = IUniswapV3Factory(UNISWAP_V3_FACTORY)
-            .getPool(token0, token1, fee);
+        address expectedPool = IUniswapV3Factory(UNISWAP_V3_FACTORY).getPool(token0, token1, fee);
 
         require(expectedPool == pool, "INVALID_POOL");
 
