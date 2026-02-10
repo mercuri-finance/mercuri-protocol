@@ -202,14 +202,14 @@ contract Vault is ReentrancyGuard {
             "ETH_NOT_ACCEPTED"
         );
 
-        if (token0 == WETH && msg.value > 0) {
+        if (token0 == WETH && msg.value != 0) {
             require(amount0 == msg.value, "wrong ETH amount0");
             IWETH(WETH).deposit{value: msg.value}();
         } else {
             IERC20(token0).safeTransferFrom(msg.sender, address(this), amount0);
         }
 
-        if (token1 == WETH && msg.value > 0 && token0 != WETH) {
+        if (token1 == WETH && msg.value != 0 && token0 != WETH) {
             require(amount1 == msg.value, "wrong ETH amount1");
             IWETH(WETH).deposit{value: msg.value}();
         } else {
@@ -314,10 +314,10 @@ contract Vault is ReentrancyGuard {
         require(params.recipient == address(this), "INVALID_RECIPIENT");
         require(params.amount0Min != 0 && params.amount1Min != 0, "NO_SLIPPAGE_PROTECTION"); 
 
-        if (params.amount0Desired > 0) {
+        if (params.amount0Desired != 0) {
             IERC20(token0).forceApprove(positionManager, params.amount0Desired);
         }
-        if (params.amount1Desired > 0) {
+        if (params.amount1Desired != 0) {
             IERC20(token1).forceApprove(positionManager, params.amount1Desired);
         }
 
@@ -344,11 +344,15 @@ contract Vault is ReentrancyGuard {
         returns (uint128 liquidity, uint256 amount0, uint256 amount1)
     {
         require(params.tokenId == positionId, "INVALID_TOKEN_ID");
-        
-        if (params.amount0Desired > 0) {
+        require(
+            params.amount0Min != 0 && params.amount1Min != 0,
+            "NO_SLIPPAGE_PROTECTION"
+        );
+
+        if (params.amount0Desired != 0) {
             IERC20(token0).forceApprove(positionManager, params.amount0Desired);
         }
-        if (params.amount1Desired > 0) {
+        if (params.amount1Desired != 0) {
             IERC20(token1).forceApprove(positionManager, params.amount1Desired);
         }
 
@@ -453,6 +457,7 @@ contract Vault is ReentrancyGuard {
         returns (uint256 amountOut)
     {
         require(params.recipient == address(this), "BAD_RECIPIENT");
+        require(params.amountOutMinimum != 0, "NO_SLIPPAGE_PROTECTION");
 
         require(
             (params.tokenIn == token0 && params.tokenOut == token1) ||
@@ -500,11 +505,11 @@ contract Vault is ReentrancyGuard {
         uint256 fee0 = (accruedFees0 * perfBps) / FeeConfig.BPS_DIVISOR;
         uint256 fee1 = (accruedFees1 * perfBps) / FeeConfig.BPS_DIVISOR;
 
-        if (fee0 > 0) {
+        if (fee0 != 0) {
             accruedFees0 -= fee0;
             IERC20(token0).safeTransfer(recipient, fee0);
         }
-        if (fee1 > 0) {
+        if (fee1 != 0) {
             accruedFees1 -= fee1;
             IERC20(token1).safeTransfer(recipient, fee1);
         }
@@ -529,7 +534,7 @@ contract Vault is ReentrancyGuard {
         (, , , , , , , uint128 liquidity, , , ,) =
             INonfungiblePositionManager(positionManager).positions(tokenId);
 
-        if (liquidity > 0) {
+        if (liquidity != 0) {
             INonfungiblePositionManager(positionManager).decreaseLiquidity(
                 INonfungiblePositionManager.DecreaseLiquidityParams({
                     tokenId: tokenId,
@@ -545,7 +550,7 @@ contract Vault is ReentrancyGuard {
     /// @notice Collects all currently owed amounts from Uniswap V3
     /// @dev
     ///  IMPORTANT UNISWAP V3 SEMANTICS:
-    ///  - If liquidity is still active (> 0), this collects **swap fees only**
+    ///  - If liquidity is still active (!= 0), this collects **swap fees only**
     ///  - If liquidity has been fully removed (liquidity == 0),
     ///    this collects **principal + any remaining fees**
     ///
@@ -566,7 +571,7 @@ contract Vault is ReentrancyGuard {
             );
 
         // Only count swap fees if liquidity was active BEFORE collecting
-        if (liquidity > 0) {
+        if (liquidity != 0) {
             accruedFees0 += a0;
             accruedFees1 += a1;
         }
