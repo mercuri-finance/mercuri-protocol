@@ -40,9 +40,13 @@ contract Vault is ReentrancyGuard {
     address public immutable owner;
 
     /// @notice Optional delegated manager for operational actions
-    /// @dev Cannot withdraw funds to arbitrary addresses
-    /// ManagerRegistry is enforced only at vault creation by the factory.
-    /// After deployment, the owner may assign any manager at their own risk.
+    /// @dev
+    /// - The manager is set once at vault deployment by the factory and is immutable afterward.
+    /// - Must be approved in the ManagerRegistry at creation time.
+    /// - Only the owner or this manager may perform operational actions (mint, rebalance,
+    ///   decrease liquidity, close positions, etc.).
+    /// - The manager cannot withdraw funds to arbitrary addresses.
+    /// - If a different manager is required, a new vault must be deployed.
     address public manager;
 
     /// @notice Mercuri registry contract address
@@ -340,7 +344,7 @@ contract Vault is ReentrancyGuard {
         returns (uint128 liquidity, uint256 amount0, uint256 amount1)
     {
         require(params.tokenId == positionId, "INVALID_TOKEN_ID");
-
+        
         if (params.amount0Desired > 0) {
             IERC20(token0).forceApprove(positionManager, params.amount0Desired);
         }
@@ -365,6 +369,10 @@ contract Vault is ReentrancyGuard {
         returns (uint256 amount0, uint256 amount1)
     {
         require(params.tokenId == positionId, "INVALID_TOKEN_ID");
+
+        _collectFees(positionId);
+        _applyPerformanceFee(positionId);
+
         return INonfungiblePositionManager(positionManager).decreaseLiquidity(params);
     }
 
