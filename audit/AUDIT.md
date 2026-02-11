@@ -1,382 +1,213 @@
 # Mercuri Protocol — Audit Response & Remediation Report
 
-**Audit Source:** SolidityScan Security Assessment  
-**Audit Date:** 18 Jan 2026  
-**Scope:** mercuri-protocol (Vault, VaultFactory, supporting interfaces)
+**Audit Source:** CredShields Smart Contract Security Audit
+**Audit Window:** Jan 30 – Feb 1, 2026
+**Retest:** Feb 10, 2026
+**Final Report:** Feb 11, 2026
+**Scope:** Mercuri Protocol Contracts (Vault, VaultFactory, ManagerRegistry, supporting interfaces)
 
-This document provides a **complete, item-by-item response** to **all findings** reported by SolidityScan.  
-No finding has been omitted.
+This document provides a complete, item-by-item response to all findings reported by CredShields.
+
+All identified vulnerabilities have been remediated and confirmed during the retesting phase.
 
 ---
 
-## Critical Findings
+# Executive Summary
 
-### C001 — Collect Allows Arbitrary Recipient (Manager Drain Risk)
+During the assessment, CredShields identified **14 total findings**:
+
+- **Critical:** 3
+- **Medium:** 1
+- **Low:** 5
+- **Informational:** 4
+- **Gas:** 1
+
+All issues were fixed prior to the final retest and verified by the auditors.
+
+---
+
+# Critical Findings
+
+## C001 — Performance Fee Bypass via Collect Ordering
+
+**Status:** Fixed
+
+**Root Cause:**
+Authorized manager/owner could call `collect()` after removing liquidity and before protocol fees were applied, bypassing performance fees.
+
+**Remediation:**
+
+- Removed vulnerable public execution path.
+- Restricted fee collection to fee-safe lifecycle flows.
+- Enforced protocol fee application ordering before principal withdrawal.
+
+---
+
+## C002 — Performance Fees Applied to Principal
+
+**Status:** Fixed
+
+**Root Cause:**
+Fee calculation used full token balances, mixing swap fees with principal.
+
+**Remediation:**
+
+- Introduced accounting separation between:
+    - Swap fees
+    - Principal
+    - Idle balances
+
+- Fees now applied strictly to earned swap fees only.
+
+---
+
+## C003 — Unrestricted Liquidity Decrease Breaks Fee Accounting
+
+**Status:** Fixed
+
+**Root Cause:**
+Liquidity could be decreased outside enforced lifecycle, causing:
+
+- Fee bypass (full removal case)
+- Fees charged on principal (partial removal case)
+
+**Remediation:**
+
+- Enforced strict lifecycle ordering:
+    1. Collect swap fees
+    2. Apply protocol fee
+    3. Decrease liquidity
+
+---
+
+# Medium Severity Findings
+
+## M001 — Withdrawals Can Revert for Non-Payable Owner
+
+**Status:** Fixed
+
+**Root Cause:**
+Vault always unwrapped WETH → ETH, assuming owner can receive ETH.
+
+**Remediation:**
+
+- Added configurable withdrawal behavior:
+    - Transfer WETH directly, or
+    - Unwrap to ETH
+
+---
+
+# Low Severity Findings
+
+## L001 — Router Can Force WETH Conversion
 
 **Status:** Fixed
 
 **Remediation:**
 
-- Enforced `params.recipient == address(this)` in all `collect()` entry points.
-- Manager can no longer redirect fees or principal externally.
+- ETH accepted only when WETH is part of the pool.
 
 ---
 
-### C002 — Manager Can Drain Vault via Arbitrary Collect
+## L002 — Unapproved Manager Assignable at Deployment
 
 **Status:** Fixed
 
 **Remediation:**
 
-- Same fix as C001.
-- Collect recipient hard-bound to vault address.
+- Factory now validates manager against ManagerRegistry.
 
 ---
 
-## High Severity Findings
-
-### H001 — Insufficient Pool Authenticity Verification
+## L003 — ManagerRegistry Owner Irrecoverable
 
 **Status:** Fixed
 
 **Remediation:**
 
-```solidity
-address expectedPool =
-    IUniswapV3Factory(UNISWAP_V3_FACTORY).getPool(token0, token1, fee);
-require(expectedPool == pool, "INVALID_POOL");
-```
+- Ownership transfer capability introduced.
 
 ---
 
-### H002 — Mint Can Exfiltrate Funds via Arbitrary Recipient
+## L004 — Swap Fee Upper Bound Not Enforced
 
 **Status:** Fixed
 
 **Remediation:**
 
-- Enforced `params.recipient == address(this)` in `mintPosition`.
+- Enforced BPS ceiling (≤ 10,000).
 
 ---
 
-### H003 — Performance Fee Applied to Principal
-
-**Status:** Fixed
-
-**Remediation:**
-Order-sensitive unwind enforced:
-
-```solidity
-_collectFees(tokenId);          // swap fees
-_applyPerformanceFee(tokenId);  // protocol fee
-_decreaseAllLiquidity(tokenId); // principal only
-_collectFees(tokenId);          // principal
-```
-
----
-
-### H004 — Pool Factory Parameter Validation Weak
-
-**Status:** Pending Fix
-
-**Justification:**
-
-- Covered indirectly by factory-level pool verification.
-- Additional defensive checks planned.
-
----
-
-### H005 — Protocol Fee Bypass via Pre-Collecting Fees
-
-**Status:** Pending Fix
-
-**Justification:**
-
-- Requires tracking historical fee state.
-- Will be addressed in next version with accounting separation.
-
----
-
-### H006 — Reentrancy
-
-**Status:** Pending Fix
-
-**Justification:**
-
-- All state mutations are finalized before external calls.
-- `nonReentrant` is applied to all external entry points.
-- Finding is tool-heuristic based; no exploitable path identified.
-
----
-
-### H007 — Withdrawal Queue Ordering Bugs
+## L005 — Floating / Outdated Solidity Pragma
 
 **Status:** Fixed
 
 **Remediation:**
 
-- Strict unwind ordering enforced.
-- Principal and fee flows isolated.
+- Locked compiler version across all contracts.
 
 ---
 
-## Medium Severity Findings
+# Informational Findings
 
-### M001 — ETH/WETH Unwrap Logic Fragile
+## I001 — Mint Allowed Zero Slippage Protection
 
 **Status:** Fixed
 
 **Remediation:**
 
-- ETH accepted only when token0 or token1 is WETH.
-- Router-origin ETH auto-wrapped.
+- Enforced non-zero `amount0Min` / `amount1Min`.
 
 ---
 
-### M002 — Fee Mechanism Vulnerabilities
+## I002 — Misspelled Event Name
 
 **Status:** Fixed
 
 **Remediation:**
 
-- Fees applied only after explicit fee collection.
-- Principal excluded.
+- Corrected event name for monitoring compatibility.
 
 ---
 
-### M003 — IncreaseLiquidity Lacks TokenId Scoping
+## I003 — Missing Zero Address Validations
 
 **Status:** Fixed
 
 **Remediation:**
 
-```solidity
-require(params.tokenId == positionId, "INVALID_TOKEN_ID");
-```
+- Added validation across all address setters.
 
 ---
 
-### M004 — Missing Zero Address Validation for Swap Router
-
-**Status:** Pending Fix
-
-**Justification:**
-
-- Router is immutable and factory-provided.
-- Additional check will be added for completeness.
-
----
-
-### M005 — Approve Front-Running Attack
+## I004 — Ownable2Step Recommended
 
 **Status:** Fixed
 
 **Remediation:**
 
-- Approvals reset to zero before re-approval.
+- Migrated ownership model to safer transfer pattern.
 
 ---
 
-### M006 — Deprecated SafeApprove
+# Gas Optimization
 
-**Status:** Partially Fixed
-
-**Justification:**
-
-- Remaining instances are safe-reset patterns.
-
----
-
-### M007 — Swap Fee Upper Bound Not Enforced
+## G001 — Conditional Operator Optimization
 
 **Status:** Fixed
 
----
+**Remediation:**
 
-### M008 — Sweep Token Function Unsafe
-
-**Status:** Pending Fix
-
-**Justification:**
-
-- Function intentionally omitted in final design.
+- Replaced `x > 0` with `x != 0` where applicable.
 
 ---
 
-### M009 — Uninitialized Ownership
+# Final Security Statement
 
-**Status:** Partially Fixed
+- All 14 findings identified by CredShields were fixed.
+- All fixes were verified in retest.
+- No outstanding security vulnerabilities remain in the audited scope.
+- Critical business logic vulnerabilities related to fee accounting and lifecycle ordering have been fully resolved.
 
-**Justification:**
-
-- Vault ownership immutable via constructor.
-- Factory ownership handled by OZ Ownable.
-
----
-
-### M010 — Unlimited Approvals Without Revocation
-
-**Status:** Fixed
-
----
-
-### M011 — Unprotected Ether Withdrawal
-
-**Status:** Fixed
-
----
-
-### M012 — Zero Amount Swaps Not Rejected
-
-**Status:** Fixed
-
----
-
-## Low Severity Findings
-
-### L001 — Burn Allows Arbitrary NFT Burn if Approved
-
-**Status:** Fixed
-
----
-
-### L002 — ClosePosition Uses amount0Min/amount1Min = 0
-
-**Status:** Pending Fix
-
-**Justification:**
-
-- Intended design choice to avoid forced reverts during emergency exits.
-
----
-
-### L003 — ClosePosition Arbitrary TokenId
-
-**Status:** Fixed
-
----
-
-### L004 — Core Dependency Addresses Not Checked for Code
-
-**Status:** Fixed
-
----
-
-### L005 — DecreaseLiquidity Arbitrary TokenId
-
-**Status:** Fixed
-
----
-
-### L006 — Event Name Typo
-
-**Status:** Fixed
-
----
-
-### L007 — Manager Registry Not Enforced at Deployment
-
-**Status:** Fixed
-
----
-
-### L008 — Missing SafeERC20 Usage
-
-**Status:** Fixed
-
----
-
-### L009 — Misspelled Event Name
-
-**Status:** Pending Fix
-
----
-
-### L010 — Position Manager / Factory Mismatch
-
-**Status:** Fixed
-
----
-
-### L011 — Non-Zero Allowance After Swap
-
-**Status:** Pending Fix
-
----
-
-### L012 — Rebalance Can Route Through Wrong Pool
-
-**Status:** Fixed
-
----
-
-### L013 — Weak Min Checks on Liquidity Removal
-
-**Status:** Fixed
-
----
-
-### L014 — Approving Zero Address
-
-**Status:** Fixed
-
----
-
-### L015 — Zero Address Manager Allowed
-
-**Status:** Fixed
-
----
-
-### L016 — Event-Based Reentrancy
-
-**Status:** Pending Fix
-
-**Justification:**
-
-- Events emit after state changes.
-- No state mutation occurs post-event.
-
----
-
-### L017–L023 — Style, Compiler, and Modifier Findings
-
-**Status:** Partially Fixed / Pending
-
-**Justification:**
-
-- Non-security-impacting.
-- Scheduled for refactor release.
-
----
-
-## Informational Findings (I001–I015)
-
-**Status:** Partially Fixed / Pending
-
-**Justification:**
-
-- Documentation, naming, and style improvements.
-- No impact on protocol safety.
-
----
-
-## Gas Findings (G001–G016)
-
-**Status:** Pending Fix
-
-**Justification:**
-
-- Explicitly deprioritized in favor of security correctness.
-- Will be addressed in a dedicated gas-optimization pass.
-
----
-
-## Final Statement
-
-- **All Critical and exploitable High issues are fixed**
-- **No known fund-loss vectors remain**
-- **Pending issues are either non-exploitable, informational, or gas-related**
-- **Design choices marked “Pending” are intentional and documented**
-
----
+This report reflects the current secured state of the Mercuri Protocol following the February 2026 audit.
